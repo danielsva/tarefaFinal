@@ -7,146 +7,104 @@
 #include "lib/ssd1306.h"
 #include "lib/font.h"
 
-
 #define I2C_PORT i2c1
 #define I2C_SDA 14
 #define I2C_SCL 15
 #define endereco 0x3C
-#define JOYSTICK_Y_PIN 27  // GPIO para eixo Y
-#define Botao_A 5 // GPIO para botão A
+#define JOYSTICK_Y_PIN 27
+#define JOYSTICK_X_PIN 26
+#define Botao_A 5
 #define LED_VERMELHO 13
 #define LED_AZUL 12
 #define LED_VERDE 11
-
+#define BUZZER 10  // Novo pino do buzzer
 
 void configurar_pwm(uint pin) {
-  gpio_set_function(pin, GPIO_FUNC_PWM);  // Configura o pino como PWM
-  uint slice = pwm_gpio_to_slice_num(pin); // Obtém o slice do PWM para o pino
-  pwm_set_wrap(slice, 4095); // Define o valor máximo do contador PWM
-  pwm_set_chan_level(slice, pwm_gpio_to_channel(pin), 0); // Inicializa com 0% de duty cycle
-  pwm_set_enabled(slice, true); // Habilita o PWM
+    gpio_set_function(pin, GPIO_FUNC_PWM);
+    uint slice = pwm_gpio_to_slice_num(pin);
+    pwm_set_wrap(slice, 4095);
+    pwm_set_chan_level(slice, pwm_gpio_to_channel(pin), 0);
+    pwm_set_enabled(slice, true);
 }
 
+int main() {
+    stdio_init_all();
 
-int main()
-{
-  //Inicializa os LEDs, Joystick Y e botão A
-  gpio_init(Botao_A);
-  gpio_set_dir(Botao_A, GPIO_IN);
-  gpio_pull_up(Botao_A);
+    // Inicializa pinos
+    gpio_init(Botao_A);
+    gpio_set_dir(Botao_A, GPIO_IN);
+    gpio_pull_up(Botao_A);
 
-  gpio_init(LED_AZUL);
-  gpio_set_dir(LED_AZUL, GPIO_OUT);
+    gpio_init(LED_AZUL);
+    gpio_set_dir(LED_AZUL, GPIO_OUT);
+    gpio_put(LED_AZUL, 0);
 
-  gpio_init(LED_VERDE);
-  gpio_set_dir(LED_VERDE, GPIO_OUT);
-  gpio_put(LED_VERDE, 0); // Inicialmente apagado
+    gpio_init(LED_VERDE);
+    gpio_set_dir(LED_VERDE, GPIO_OUT);
+    gpio_put(LED_VERDE, 0);
 
-  gpio_init(LED_VERMELHO);
-  gpio_set_dir(LED_VERMELHO, GPIO_OUT);
+    gpio_init(LED_VERMELHO);
+    gpio_set_dir(LED_VERMELHO, GPIO_OUT);
+    gpio_put(LED_VERMELHO, 0);
 
-  // I2C Initialisation. Using it at 400Khz.
-  i2c_init(I2C_PORT, 400 * 1000);
+    gpio_init(BUZZER);
+    gpio_set_dir(BUZZER, GPIO_OUT);
+    gpio_put(BUZZER, 0);  // Buzzer desligado inicialmente
 
-  gpio_set_function(I2C_SDA, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
-  gpio_set_function(I2C_SCL, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
-  gpio_pull_up(I2C_SDA); // Pull up the data line
-  gpio_pull_up(I2C_SCL); // Pull up the clock line
-  ssd1306_t ssd; // Inicializa a estrutura do display
-  ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT); // Inicializa o display
-  ssd1306_config(&ssd); // Configura o display
-  ssd1306_send_data(&ssd); // Envia os dados para o display
+    // Inicializa I2C e display OLED
+    i2c_init(I2C_PORT, 400 * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
 
-  // Limpa o display. O display inicia com todos os pixels apagados.
-  ssd1306_fill(&ssd, false);
-  ssd1306_send_data(&ssd);
+    ssd1306_t ssd;
+    ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT);
+    ssd1306_config(&ssd);
+    ssd1306_send_data(&ssd);
+    ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
 
-  //Inicializando o ADC
-  adc_init();
-  adc_gpio_init(JOYSTICK_Y_PIN); 
-  adc_select_input(1);
-  
-  // Configurar LEDs como PWM
-  configurar_pwm(LED_AZUL);
-  configurar_pwm(LED_VERMELHO);
+    // Inicializa ADC
+    adc_init();
+    adc_gpio_init(JOYSTICK_X_PIN);
+    adc_gpio_init(JOYSTICK_Y_PIN);
 
-  uint slice_azul = pwm_gpio_to_slice_num(LED_AZUL);
-  uint slice_vermelho = pwm_gpio_to_slice_num(LED_VERMELHO);
-  
-  uint16_t adc_value_x;
-  uint16_t adc_value_y;  
-  char str_x[5];  // Buffer para armazenar a string
-  char str_y[5];  // Buffer para armazenar a string  
-  
-  // Variáveis para o quadrado
-  int quadrado_x = 60, quadrado_y = 28;
-  bool estado_led_verde = false;
-  bool pwm_ativo = true;
-  int estilo_borda = 0;
-  bool botao_pb_pressionado = false;
-  bool botao_a_pressionado = false;
 
-  while (true)
-  {
-    //Leitura do joystick
+    uint16_t adc_value_x, adc_value_y;
+    bool alerta_gas = false;
 
-    adc_select_input(0); // Seleciona o ADC para eixo X. O pino 26 como entrada analógica
-    adc_value_x = adc_read();
-    adc_select_input(1); // Seleciona o ADC para eixo Y. O pino 27 como entrada analógica
-    adc_value_y = adc_read(); 
+    while (true) {
+        // Leitura do joystick
+        adc_select_input(0);
+        adc_value_x = adc_read();
+        adc_select_input(1);
+        adc_value_y = adc_read();
 
-    // Converte valores ADC para posição do quadrado (ajuste para centralizar)
-    quadrado_x = (adc_value_x * 112) / 4095 + 8; // De 8 a 120 pixels
-    quadrado_y = (adc_value_y * 48) / 4095 + 8;  // De 8 a 56 pixels
+        // Lógica de alerta de gás
+        if (adc_value_x > 4000 || adc_value_x < 100 || adc_value_y > 4000 || adc_value_y < 100) {
+            alerta_gas = true;
+            gpio_put(BUZZER, 1);  // Ativa o buzzer
+            gpio_put(LED_VERDE, 0); // Desativa LED Verde
+            gpio_put(LED_VERMELHO, 1); // Ativa LED Vermelho
+        } else {
+            alerta_gas = false;
+            gpio_put(BUZZER, 0);  // Desativa o buzzer
+            gpio_put(LED_VERMELHO, 0); // Desativa LED Vermelho
+            gpio_put(LED_VERDE, 1); //Ativa LED Verde
+        }
 
-    
-    // Converte o valor do ADC (0-4095) para duty cycle (0-100%)
-    uint16_t duty_cycle_y = abs(2048 - adc_value_y) * 2; // Ajusta a intensidade
-    uint16_t duty_cycle_x = abs(2048 - adc_value_x) * 2; // Ajuste proporcional
+        // Atualiza o display
+        ssd1306_fill(&ssd, false);
 
-    
-    if (pwm_ativo) {
-      pwm_set_chan_level(slice_azul, pwm_gpio_to_channel(LED_AZUL), duty_cycle_y);
-  } else {
-      pwm_set_chan_level(slice_azul, pwm_gpio_to_channel(LED_AZUL), 0);
-  }
+        // Mostra alerta ou mensagem padrão
+        if (alerta_gas) {
+            ssd1306_draw_string(&ssd, "ALERTA: GAS DETECTADO", 10, 10);
+        } else {
+            ssd1306_draw_string(&ssd, "RECEBENDO DADOS", 10, 10);
+        }
 
-  // Detecta o botão A pressionado e alterna os LEDs PWM
-  if (gpio_get(Botao_A) == 0 && !botao_a_pressionado) {
-    botao_a_pressionado = true;
-    pwm_ativo = !pwm_ativo;
-  }
-  if (gpio_get(Botao_A) == 1) {
-      botao_a_pressionado = false;
-  }
-
-  // Atualiza o display
-  ssd1306_fill(&ssd, false);
-  
-  // Desenha a borda conforme o estilo atual
-  if (estilo_borda == 0) {
-    ssd1306_rect(&ssd, 3, 3, 122, 60, true, false); // Borda normal
-  } else if (estilo_borda == 1) {
-      ssd1306_line(&ssd, 3, 3, 122, 3, true); // Borda superior
-      ssd1306_line(&ssd, 3, 60, 122, 60, true); // Borda inferior
-  } else if (estilo_borda == 2) {
-      ssd1306_rect(&ssd, 3, 3, 122, 60, true, true); // Borda invertida
-  }
-
-  // Desenha o quadrado no display
-  ssd1306_rect(&ssd, quadrado_x, quadrado_y, 8, 8, true, true);
-
-  // Mostra os valores do joystick
-  char str_x[6], str_y[6];
-  sprintf(str_x, "%d", adc_value_x);
-  sprintf(str_y, "%d", adc_value_y);
-  ssd1306_draw_string(&ssd, "X:", 10, 30);
-  ssd1306_draw_string(&ssd, str_x, 30, 30);
-  ssd1306_draw_string(&ssd, "Y:", 10, 45);
-  ssd1306_draw_string(&ssd, str_y, 30, 45);
-
-  ssd1306_send_data(&ssd);
-  sleep_ms(50);
- }
-
+        ssd1306_send_data(&ssd);
+        sleep_ms(50);
+    }
 }

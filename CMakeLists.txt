@@ -53,10 +53,20 @@ target_include_directories(tarefa_Final PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-# Add any user requested libraries
+include_directories(${CMAKE_CURRENT_LIST_DIR}/include)
+
+# Add the lwIP source and include directories to the build
+target_include_directories(tarefa_Final PRIVATE
+
+)
+
+# Link lwIP libraries, if necessary
 target_link_libraries(tarefa_Final 
-        hardware_i2c hardware_adc pico_stdlib hardware_pwm
-        )
+    pico_stdlib
+    hardware_i2c
+    hardware_adc
+    hardware_pwm
+    )
 
+# Add extra outputs and set up the project
 pico_add_extra_outputs(tarefa_Final)
-
